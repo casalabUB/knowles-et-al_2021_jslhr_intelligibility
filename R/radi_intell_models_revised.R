@@ -1,4 +1,23 @@
+# R script for statistical models for Knowles et al., 2021
+# https://doi.org/10.1044/2021_JSLHR-20-00593
+# NOTE: the output of this script and of the 1_tidy_vas.R script sourced below are available in radi_intell_vas.RData
+# This script is available for transparency, but will not be able to be run
+
 # RADI intell models revised for intell manuscript
+
+# Load libraries ----
+library(plyr)
+library(tidyverse)
+#library("tidylog", warn.conflicts = FALSE)
+library(cowplot)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(rms)
+library(psych) # for ICC
+library(ggplot2)
+library(thear)
+library(ggridges)
 
 # Load original data ----
 source("../scripts/1_tidy_vas.R")
@@ -209,10 +228,6 @@ summary(m_vas)
 summary(m_sits)
 
 
-# "better" to include model with nwords (complexity), but this is difficult to interpret, so running simplified model instead
-anova(m_vas, m_complexity) # better to include the model with nwords
-
-
 m_sits_dur <- lmerTest::lmer(
   log(wpm) ~ #log transformed b/c of resid plots
     group*rate_ordered + 
@@ -226,7 +241,7 @@ summary(m_sits_dur)
 plot(m_vas)
 plot(resid(m_vas),car::logit(df_vas$vas_prop))
 plot(m_vas) # looks ok
-qqnorm(resid(m_vas)) # a little wonky at the negative extremes
+qqnorm(resid(m_vas)) 
 qqline(resid(m_vas))
 
 hist(df_vas$vas_prop)
@@ -239,76 +254,6 @@ qqnorm(resid(m_sits_dur))
 qqline(resid(m_sits_dur)) 
 
 
-# Problematic participants ----
-# Do the edgecase participants make a difference in the model? No.
-problematic_participants <- c(
-  # # Dentures
-  # "203","206","211","310","314","320","322","506",
-  # # L2 English
-  # "301", "310", "320", "316",
-  # # childhood stuttering
-  # "301", "303",
-  # # TIA
-  # "301", "514",
-  # # Distorted speech controls
-  # "206", "210")
-  
-# Reviewer 2 requests
-  # low MoCA
-  #"302", "502", "506",
-  # early onset
-  "304", "309")
-
-
-df_vas <- df_vas %>%
-  select(-problematic_participants) %>%
-  mutate(prob_partic = if_else(participant %in% problematic_participants,TRUE,FALSE))
-
-summary(df_vas$prob_partic)
-#    Mode   FALSE    TRUE 
-# logical   18521     552
-df_vas %>% select(participant, prob_partic) %>% filter(participant=="304")
-df_vas_subset <- df_vas %>% filter(prob_partic == FALSE)
-
-xtabs(~participant, df_vas)
-xtabs(~participant+prob_partic, df_vas)
-length(unique(df_vas$participant)) #69
-xtabs(~participant, df_vas_subset)
-length(unique(df_vas_subset$participant)) #58
-
-
-# __Model ----
-m_vas_problematic <- lmerTest::lmer(
-     psych::logit(vas_prop) ~
-          group*rate*task+
-          listener +
-          prob_partic +
-          (1 + (S4vH1 + S3vH1 + S2vH1 + F2vH1 + F3vH1 + F4vH1) || participant),
-     data = df_vas,
-     REML = FALSE
-)
-summary(m_vas_problematic)
-# problematic participants (dentures, TIA, etc) did NOT improve model fit
-# low moca partics alone did NNOT improve model fit
-# low moca + early onset DID improve model fit
-anova(m_vas, m_vas_problematic)
-beepr::beep(2)
-
-# 12/10 done with early onsets removed, 304, 309
-m_vas_problematic_removed <- lmerTest::lmer(
-     psych::logit(vas_prop) ~
-          group*rate*task+
-          listener +
-          (1 + (S4vH1 + S3vH1 + S2vH1 + F2vH1 + F3vH1 + F4vH1) || participant),
-     data = filter(df_vas,prob_partic==FALSE),
-     REML = FALSE
-)
-
-summary(m_vas_problematic_removed)
-#Difs: 
-# - main effects same
-# - slow speech: 
-#sjPlot::tab_model(m_vas_problematic, p.val = "kr", show.df = TRUE)
 
 # Coefs ----
 vasB <- summary(m_vas)$coefficients[,1] %>% round(3)
@@ -380,195 +325,7 @@ emmip(m_vas, group~complexity, CIs = TRUE)+
   scale_color_manual(values = lacroix_palette("PeachPear", n=4, type = "continuous"))
 
 
-# Use this just to visualize task effects. This is not the final model
-emmeans::emmip(m_task, group~task~rate, CIs = TRUE)+
-  scale_linetype_manual(values = c("dashed","dashed","dashed","dashed",
-                                   "solid","solid","solid","solid"))+ #not working
-  theme_bw()+
-  scale_x_discrete(limits = c("S4","S3","S2","H1","F2","F3","F4"))+
-  facet_wrap(~group)#+
-
 emmip(m_vas, ~group)
 emmip(m_vas, ~complexity)
 
-# Plot model results with sjPlot ----
-# library(sjPlot)
-# terms_complexity <- unique(filter(vas_coef, str_starts(Contrast, "complexity"))$Contrast)
-# terms_group <- c("groupYC vs rest","groupOC vs rest","groupPD vs DBS")
-# sjPlot::plot_model(m_vas)
-# sjPlot::plot_model(m_vas, terms = terms_complexity, show.values = TRUE)
-# sjPlot::plot_model(m_vas, terms = terms_group, show.values = TRUE)
-
-
-
-save.image("../manuscripts/radi_intell_manuscript/radi_intell_vas.RData")
-
-# wpm ~ rate condition
-# Ridgeplots
-df_sits_dur %>%
-     ggplot(aes(x=wpm, y=rate_ordered, fill=group, alpha = rate_ordered, 
-                height = ..density..)) + 
-     geom_density_ridges(stat="density")+
-     scale_fill_manual(values = lacroix_palette("PeachPear", n=4),
-                        name="Group")+
-     scale_color_manual(values = lacroix_palette("PeachPear", n=4),
-                        name="Group")+
-  scale_alpha_manual(values = c(0.5,0.5,0.5,1,0.5,0.5,0.5))+
-    geom_vline(data = df_sits_habit_dur, aes(xintercept = wpm_habit,color=group), linetype="dashed")+
-  facet_wrap(~group)+
-     labs(x="Speech rate (WPM) \nSlow to fast",
-          y="Group \nDensity")+
-        guides(fill=FALSE, color=FALSE,alpha = FALSE)+
-  theme_bw()
-
-# Lines
-df_sits_dur %>%
-  group_by(participant, rate_ordered, group, item) %>%
-  summarize(wpm = mean(wpm)) %>%
-     ggplot(aes(x = rate_ordered, y = wpm, 
-                color = group, group = participant)) + 
-     geom_jitter(alpha=0.075) +
-     stat_smooth(method = 'loess',
-                 geom = 'line', alpha=0.6) +
-  geom_smooth(method = "loess", aes(group=group),
-              color = "black", alpha = 1,
-              size = 1)+
-  facet_wrap(~group)+
-  geom_vline(xintercept = "H1", linetype = "dashed", color = "darkgrey")+
-  #geom_hline(yintercept = mean(subset(df_sits_dur,rate=="H1")$wpm), linetype="dashed", color="darkgrey")+
-  geom_hline(data = df_sits_habit_dur, aes(yintercept = wpm_habit,color=group), linetype="dashed")+#, linetype="dashed", color="darkgrey")+
-     theme(legend.position = "blanks")+
-     scale_color_manual(values = lacroix_palette("PeachPear", n=4, type = "continuous"))+
-guides(color=FALSE)+
-  theme_bw()+
-  ylab("WPM")+
-  xlab("Rate condition \n(slow to fast)")
-
-
-# No bueno
-df_vas %>%
-  ggplot(aes(
-    #x=car::logit(vas_prop),
-    x=vas_prop,
-    y=rate_ordered,
-    fill=group))+
-  ggridges::geom_density_ridges()+
-  #facet_wrap(~group,ncol=1)+
-  #geom_vline(data=df_vas, aes(xintercept=mean(car::logit(vas_prop))))+
-  theme_bw()
-
-df_vas %>%
-     ggplot(aes(x = rate_ordered, y = vas_prop, 
-                color = group, group = participant)) + 
-     geom_jitter(alpha=0.075) +
-     geom_smooth(method = 'loess',alpha=0.1) +
-  geom_smooth(method = "loess", aes(group=group),color = "white", se = TRUE)+
-  geom_vline(xintercept = "H1", linetype = "dashed", color = "darkgrey")+
-     #geom_vline(xintercept = which(vas_gr$rate=="h1"), linetype = "dashed", color="darkgrey")+
-     facet_wrap(~group)+
-     theme(legend.position = "blanks")+
-           #strip.background = element_rect(fill=lacroix_palette("PassionFruit")[2]),
-           #strip.text = element_text(color = "white"),
-           #axis.text = element_blank())+
-     scale_color_manual(values = lacroix_palette("PeachPear", n=4, type = "continuous"))+
-  guides(color=FALSE)+
-  theme_bw()
-
-# Use this one to show group trend
-df_vas %>%
-  ggplot(aes(x=rate_ordered, y = vas_prop, color = group, group = group))+
-  #geom_jitter(stat='identity',alpha=0.075)+
-  geom_smooth(method = "loess", level=0.95)+
-  facet_wrap(~task)+
-  geom_vline(xintercept="H1", linetype = "dashed", color="darkgrey")+
-  scale_color_manual(values = lacroix_palette("PeachPear", n=4, type = "continuous"))+
-  theme_bw()+
-  theme(legend.position = "bottom")+
-  ylab("Intelligibility \n(low to high)")+
-  xlab("Rate condition \n(slow to fast)")
-
-# problematic participants
-# Use this one to show group trend
-df_vas %>%
-  ggplot(aes(x=rate_ordered, y = vas_prop, color = problematic_participants, group = participant))+
-  #geom_jitter(stat='identity',alpha=0.075)+
-  geom_smooth(method = "loess", level=0.99)+
-  facet_wrap(~task)+
-  geom_vline(xintercept="H1", linetype = "dashed", color="darkgrey")+
-  scale_color_manual(values = lacroix_palette("PeachPear", n=4, type = "continuous"))+
-  theme_bw()+
-  theme(legend.position = "bottom")+
-  ylab("Intelligibility \n(low to high)")+
-  xlab("Rate condition \n(slow to fast)")+
-  facet_wrap(~problematic_participants)
-
-# By complexity
-df_vas %>%
-  ggplot(aes(x=complexity, y = vas_prop, color = group, group = group))+
-  #geom_jitter(stat='identity',alpha=0.075)+
-  geom_smooth(method = "loess", level=0.99)+
-  #facet_wrap(~task)+
-  geom_vline(xintercept="H1", linetype = "dashed", color="darkgrey")+
-  scale_color_manual(values = lacroix_palette("PeachPear", n=4, type = "continuous"))+
-  theme_bw()+
-  theme(legend.position = "bottom")+
-  ylab("Intelligibility \n(low to high)")+
-  xlab("Complexity")
-
-
-# sandboxing & learning ----
-# TIL: the logit function defaults to psych::logit (find that out by typing the function name into the console and seeing what its namespace is). it's the same under the hood as car::logit except that car::logit allows for adjustment of 0s and 1s. Since there are no 0s and 1s in this dataset, it's ok to just use logit (not car::logit). the results are the same. critically, using logit (not car) allows me to use the argument transform = "response" in the emmeans function to backtransform from logit to the response scale. this is more useful for interpreting the responses!
-# regarding the logit scale: i was trying to figure out why the logit-responses were always positive; it's because (i think) that the proportions were always greater than 0.5... since logit transforms 0 to 1 to -6 to +6, 0 is the midway (which corresponds to 0.5). Since no estimates fell below 50% intelligibility(??), the logit response was always positive.
-
-test <- df_vas %>% select(vas_prop) %>% mutate(psych_logit = logit(vas_prop),car_logit = car::logit(vas_prop))
-# > summary(test)
-#     vas_prop         psych_logit       car_logit     
-#  Min.   :0.000789   Min.   :-7.144   Min.   :-7.144  
-#  1st Qu.:0.829519   1st Qu.: 1.582   1st Qu.: 1.582  
-#  Median :0.949224   Median : 2.928   Median : 2.928  
-#  Mean   :0.859456   Mean   : 3.088   Mean   : 3.088  
-#  3rd Qu.:0.992634   3rd Qu.: 4.903   3rd Qu.: 4.903  
-#  Max.   :0.999211   Max.   : 7.144   Max.   : 7.144 
-
-tmp1 <- lmerTest::lmer(
-     car::logit(vas_prop) ~
-       group*task+
-          listener +
-          (1 | participant),
-     data = df_vas,
-     REML = FALSE
-)
-tmp2 <- lme4::lmer(
-     car::logit(vas_prop) ~
-       group*task+
-          listener +
-          (1 | participant),
-     data = df_vas,
-     REML = FALSE
-)
-anova(tmp1,tmp2) # identical whether fit with lmertest or lme4 package
-summary(tmp1)
-summary(tmp2) # identical just no pvals
-
-tmp3 <- lme4::lmer(
-     logit(vas_prop) ~
-       group*task+
-          listener +
-          (1 | participant),
-     data = df_vas,
-     REML = FALSE
-)
-anova(tmp2,tmp3)
-summary(tmp3)
-
-tmp4 <- lme4::lmer(
-     car_logit_test(vas_prop) ~
-       group*task+
-          listener +
-          (1 | participant),
-     data = df_vas,
-     REML = FALSE
-)
-anova(tmp3,tmp4) # identical to tmp3
-emmeans::emmeans(tmp4, pairwise ~ group | task, transform = "response")
-
+#save.image("../manuscripts/radi_intell_manuscript/radi_intell_vas.RData")
